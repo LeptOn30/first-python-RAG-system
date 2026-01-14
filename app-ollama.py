@@ -1,4 +1,4 @@
-# Core dependencies
+# Core dependencies ...
 import streamlit as st
 import openai
 import numpy as np
@@ -6,36 +6,22 @@ import faiss
 from pathlib import Path
 from io import BytesIO
 
-# Document processing imports
+# Document processing imports ...
 from pypdf import PdfReader
 from docx import Document
 import pandas as pd
 from bs4 import BeautifulSoup
 
-# ============== Configuration ==============
+# ============== Configuration for Ollama ==============
 
-EMBEDDING_MODEL = "text-embedding-3-small"
-CHAT_MODEL = "gpt-4o-mini"
+EMBEDDING_MODEL = "nomic-embed-text"
+CHAT_MODEL = "llama3"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 
-# Supported file types
+# Supported file types ...
 SUPPORTED_TYPES = ["txt", "md", "pdf", "docx", "csv", "xlsx", "html"]
-
-
-def get_api_key() -> str | None:
-    """Get API key from secrets.toml or environment."""
-    # Try Streamlit secrets first
-    if "OPENAI_API_KEY" in st.secrets:
-        return st.secrets["OPENAI_API_KEY"]
-
-    # Fallback to environment variable
-    import os
-
-    if os.getenv("OPENAI_API_KEY"):
-        return os.getenv("OPENAI_API_KEY")
-
-    return None
 
 
 # ============== Document Readers ==============
@@ -43,11 +29,13 @@ def get_api_key() -> str | None:
 
 def read_txt(file) -> str:
     """Read plain text or markdown file."""
+
     return file.read().decode("utf-8")
 
 
 def read_pdf(file) -> str:
     """Extract text from PDF file."""
+
     reader = PdfReader(file)
     text_parts = []
 
@@ -61,6 +49,7 @@ def read_pdf(file) -> str:
 
 def read_docx(file) -> str:
     """Extract text from Word document."""
+
     doc = Document(file)
     paragraphs = []
 
@@ -68,12 +57,13 @@ def read_docx(file) -> str:
         if para.text.strip():
             paragraphs.append(para.text)
 
-    # Also extract text from tables
+    # Also extract text from tables ...
     for table in doc.tables:
         for row in table.rows:
             row_text = " | ".join(
                 cell.text.strip() for cell in row.cells if cell.text.strip()
             )
+
             if row_text:
                 paragraphs.append(row_text)
 
@@ -82,9 +72,10 @@ def read_docx(file) -> str:
 
 def read_csv(file) -> str:
     """Convert CSV to readable text."""
+
     df = pd.read_csv(file)
 
-    # Create a text representation
+    # Create a text representation ...
     text_parts = [f"CSV Data with {len(df)} rows and {len(df.columns)} columns."]
     text_parts.append(f"Columns: {', '.join(df.columns.tolist())}")
     text_parts.append("\nData:\n")
@@ -95,6 +86,7 @@ def read_csv(file) -> str:
 
 def read_excel(file) -> str:
     """Convert Excel to readable text."""
+
     xlsx = pd.ExcelFile(file)
     text_parts = []
 
@@ -109,18 +101,20 @@ def read_excel(file) -> str:
 
 def read_html(file) -> str:
     """Extract text from HTML file."""
+
     content = file.read()
     soup = BeautifulSoup(content, "html.parser")
 
-    # Remove script and style elements
+    # Remove script and style elements ...
     for element in soup(["script", "style", "nav", "footer", "header"]):
         element.decompose()
 
-    # Get text with some structure preserved
+    # Get text with some structure preserved ...
     text = soup.get_text(separator="\n")
 
-    # Clean up excessive whitespace
+    # Clean up excessive whitespace ...
     lines = [line.strip() for line in text.splitlines() if line.strip()]
+
     return "\n".join(lines)
 
 
@@ -129,29 +123,35 @@ def read_file(file) -> tuple[str, str]:
     Read file based on extension.
     Returns (content, file_type)
     """
+
     filename = file.name.lower()
 
-    if filename.endswith(".pdf"):
-        return read_pdf(file), "PDF"
-    elif filename.endswith(".docx"):
-        return read_docx(file), "Word"
-    elif filename.endswith(".csv"):
-        return read_csv(file), "CSV"
-    elif filename.endswith(".xlsx"):
-        return read_excel(file), "Excel"
-    elif filename.endswith(".html") or filename.endswith(".htm"):
-        return read_html(file), "HTML"
-    else:  # txt, md, or unknown text
-        return read_txt(file), "Text"
+    match filename.split(".")[-1]:
+        case "pdf":
+            return read_pdf(file), "PDF"
+
+        case ".docx":
+            return read_docx(file), "Word"
+
+        case ".csv":
+            return read_csv(file), "CSV"
+
+        case ".xlsx":
+            return read_excel(file), "Excel"
+
+        case ".html" | ".htm":
+            return read_html(file), "HTML"
+
+        case _:   # txt, md, or unknown text ...
+            return read_txt(file), "Text"
 
 
 # ============== Core RAG Functions ==============
 
 
-def chunk_text(
-    text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP
-) -> list[str]:
+def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
     """Split text into overlapping chunks."""
+
     words = text.split()
     chunks = []
 
@@ -163,11 +163,12 @@ def chunk_text(
     return chunks
 
 
-def get_embeddings(texts: list[str], api_key: str) -> np.ndarray:
-    """Get embeddings from OpenAI API."""
-    client = openai.OpenAI(api_key=api_key)
+def get_embeddings(texts: list[str]) -> np.ndarray:
+    """Get embeddings from Ollama."""
 
-    # Process in batches of 100 (API limit)
+    client = openai.OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+
+    # Process in batches of 100 (API limit) ...
     all_embeddings = []
     batch_size = 100
 
@@ -182,30 +183,29 @@ def get_embeddings(texts: list[str], api_key: str) -> np.ndarray:
 
 def create_faiss_index(embeddings: np.ndarray) -> faiss.IndexFlatL2:
     """Create a FAISS index from embeddings."""
+
     dimension = embeddings.shape[1]
     index = faiss.IndexFlatL2(dimension)
     index.add(embeddings)
+
     return index
 
 
-def search_similar(
-    query: str,
-    index: faiss.IndexFlatL2,
-    chunks: list[str],
-    api_key: str,
-    top_k: int = 3,
-) -> list[str]:
+def search_similar(query: str, index: faiss.IndexFlatL2, chunks: list[str], top_k: int = 3) -> list[str]:
     """Find most similar chunks to the query."""
-    query_embedding = get_embeddings([query], api_key)
+
+    query_embedding = get_embeddings([query])
     distances, indices = index.search(query_embedding, top_k)
 
     results = [chunks[i] for i in indices[0] if i < len(chunks)]
+
     return results
 
 
-def generate_answer(query: str, context_chunks: list[str], api_key: str) -> str:
-    """Generate answer using OpenAI chat completion with retrieved context."""
-    client = openai.OpenAI(api_key=api_key)
+def generate_answer(query: str, context_chunks: list[str]) -> str:
+    """Generate answer using Ollama chat completion with retrieved context."""
+
+    client = openai.OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
     context = "\n\n---\n\n".join(context_chunks)
 
@@ -244,57 +244,51 @@ Answer:"""
 
 
 def main():
-    st.set_page_config(page_title="RAG Q&A System", page_icon="📚", layout="wide")
+    st.set_page_config(page_title="RAG Q&A System - Ollama", page_icon="🦙", layout="wide")
 
-    st.title("📚 RAG Document Q&A System")
-    st.markdown("*Upload documents, ask questions, get AI-powered answers*")
+    st.title("🦙 RAG Document Q&A System - Ollama")
+    st.markdown("*Upload documents, ask questions, get AI-powered answers locally*")
 
-    # Initialize session state
+    # Initialize session state ...
     if "chunks" not in st.session_state:
         st.session_state.chunks = []
+
     if "index" not in st.session_state:
         st.session_state.index = None
+
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+
     if "documents_loaded" not in st.session_state:
         st.session_state.documents_loaded = False
+
     if "doc_stats" not in st.session_state:
         st.session_state.doc_stats = []
 
-    # Sidebar for configuration
-
+    # Sidebar for configuration ...
     with st.sidebar:
         st.header("⚙️ Configuration")
 
-        # Get API key from secrets
-        api_key = get_api_key()
-
-        if api_key:
-            st.success("✅ API Key loaded")
-        else:
-            st.error("❌ API Key not found")
-            st.markdown(
-                """
-            **Setup required:**
-            
-            Create `.streamlit/secrets.toml`:
-            ```toml
-            OPENAI_API_KEY = "sk-your-key-here"
-            ```
-            
-            Or set environment variable:
-            ```bash
-            export OPENAI_API_KEY="sk-your-key"
-            ```
-            """
-            )
+        st.info(f"Using Ollama at `{OLLAMA_BASE_URL}`")
+        
+        st.markdown("**Required Models:**")
+        st.code(f"ollama pull {EMBEDDING_MODEL}")
+        st.code(f"ollama pull {CHAT_MODEL}")
+        
+        if st.button("Check Connection"):
+            try:
+                client = openai.OpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+                client.models.list()
+                st.success("✅ Connected to Ollama")
+            except Exception as e:
+                st.error(f"❌ Connection failed: {e}")
 
         st.divider()
 
-        # Document upload section
+        # Document upload section ...
         st.header("📄 Add Documents")
 
-        # Show supported formats
+        # Show supported formats ...
         with st.expander("Supported Formats"):
             st.markdown(
                 """
@@ -310,7 +304,7 @@ def main():
             """
             )
 
-        # File upload
+        # File upload ...
         uploaded_files = st.file_uploader(
             "Upload files",
             type=SUPPORTED_TYPES,
@@ -318,12 +312,12 @@ def main():
             help="Upload one or more documents",
         )
 
-        # Or paste text
+        # Or paste text ...
         pasted_text = st.text_area(
             "Or paste text directly", height=120, placeholder="Paste content here..."
         )
 
-        # Advanced settings
+        # Advanced settings ...
         with st.expander("Advanced Settings"):
             chunk_size = st.slider("Chunk size (words)", 100, 1000, CHUNK_SIZE, 50)
             chunk_overlap = st.slider(
@@ -331,12 +325,12 @@ def main():
             )
             top_k = st.slider("Results to retrieve", 1, 10, 3)
 
-        # Process button
-        if st.button("🔄 Process Documents", type="primary", disabled=not api_key):
+        # Process button ...
+        if st.button("🔄 Process Documents", type="primary"):
             all_text = ""
             doc_stats = []
 
-            # Process uploaded files
+            # Process uploaded files ...
             if uploaded_files:
                 progress = st.progress(0, "Processing files...")
 
@@ -345,20 +339,24 @@ def main():
                         content, file_type = read_file(file)
                         word_count = len(content.split())
                         all_text += f"\n\n--- Document: {file.name} ---\n\n{content}"
+
                         doc_stats.append(
                             {"name": file.name, "type": file_type, "words": word_count}
                         )
+
                         progress.progress(
                             (i + 1) / len(uploaded_files), f"Processed {file.name}"
                         )
+
                     except Exception as e:
                         st.error(f"Error reading {file.name}: {str(e)}")
 
                 progress.empty()
 
-            # Add pasted text
+            # Add pasted text ...
             if pasted_text.strip():
                 all_text += f"\n\n--- Pasted Text ---\n\n{pasted_text}"
+
                 doc_stats.append(
                     {
                         "name": "Pasted text",
@@ -368,14 +366,14 @@ def main():
                 )
 
             if all_text.strip():
-                with st.spinner("Creating embeddings and index..."):
+                with st.spinner("Creating embeddings and index ..."):
                     try:
-                        # Chunk the text
+                        # Chunk the text ...
                         chunks = chunk_text(all_text, chunk_size, chunk_overlap)
                         st.session_state.chunks = chunks
 
-                        # Create embeddings and index
-                        embeddings = get_embeddings(chunks, api_key)
+                        # Create embeddings and index ...
+                        embeddings = get_embeddings(chunks)
                         st.session_state.index = create_faiss_index(embeddings)
                         st.session_state.documents_loaded = True
                         st.session_state.doc_stats = doc_stats
@@ -385,10 +383,11 @@ def main():
 
                     except Exception as e:
                         st.error(f"Error: {str(e)}")
+
             else:
                 st.warning("Please upload files or paste text")
 
-        # Show loaded documents
+        # Show loaded documents ...
         if st.session_state.documents_loaded:
             st.divider()
             st.subheader("📊 Loaded Documents")
@@ -400,9 +399,10 @@ def main():
 
             st.markdown(f"**Total chunks:** {len(st.session_state.chunks)}")
 
-        # Clear button
+        # Clear button ...
         if st.session_state.documents_loaded:
             st.divider()
+
             if st.button("🗑️ Clear All"):
                 st.session_state.chunks = []
                 st.session_state.index = None
@@ -411,18 +411,12 @@ def main():
                 st.session_state.doc_stats = []
                 st.rerun()
 
-    # Main chat interface
-
-    if not api_key:
-        st.warning(
-            "⚠️ OpenAI API key not configured. See sidebar for setup instructions."
-        )
-        return
+    # Main chat interface ...
 
     if not st.session_state.documents_loaded:
         st.info("👈 Upload documents in the sidebar, then click 'Process Documents'")
 
-        # Show example
+        # Show example ...
         with st.expander("📖 How it works"):
             st.markdown(
                 """
@@ -431,8 +425,8 @@ def main():
             1. **Upload** — Add your documents (PDF, Word, Excel, CSV, Text, HTML)
             2. **Process** — Documents are split into chunks and converted to embeddings
             3. **Index** — Embeddings are stored in a FAISS vector index
-            4. **Query** — Your questions are matched against the document chunks
-            5. **Generate** — Relevant chunks are sent to GPT to generate accurate answers
+            4. **Query** — Your questions are matched against the document chunks locally
+            5. **Generate** — Relevant chunks are sent to local LLM to generate accurate answers
             
             **Supported document types:**
             - 📄 PDF documents
@@ -442,9 +436,10 @@ def main():
             - 📃 Text and Markdown files
             """
             )
+
         return
 
-    # Display chat history
+    # Display chat history ...
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
@@ -452,41 +447,42 @@ def main():
                 with st.expander("📎 Sources"):
                     for i, source in enumerate(msg["sources"], 1):
                         st.markdown(f"**Chunk {i}:**")
+
                         display_text = (
                             source[:500] + "..." if len(source) > 500 else source
                         )
+
                         st.markdown(f"> {display_text}")
 
-    # Chat input
+    # Chat input ...
     if query := st.chat_input("Ask a question about your documents..."):
-        # Add user message
+        # Add user message ...
         st.session_state.chat_history.append({"role": "user", "content": query})
 
         with st.chat_message("user"):
             st.markdown(query)
 
-        # Generate response
+        # Generate response ...
         with st.chat_message("assistant"):
             with st.spinner("Searching and generating answer..."):
                 try:
-                    # Get top_k from session or default
+                    # Get top_k from session or default ...
                     top_k = st.session_state.get("top_k", 3)
 
-                    # Search for relevant chunks
+                    # Search for relevant chunks ...
                     relevant_chunks = search_similar(
                         query,
                         st.session_state.index,
                         st.session_state.chunks,
-                        api_key,
                         top_k=top_k,
                     )
 
-                    # Generate answer
-                    answer = generate_answer(query, relevant_chunks, api_key)
+                    # Generate answer ...
+                    answer = generate_answer(query, relevant_chunks)
 
                     st.markdown(answer)
 
-                    # Show sources
+                    # Show sources ...
                     with st.expander("📎 Sources"):
                         for i, source in enumerate(relevant_chunks, 1):
                             st.markdown(f"**Chunk {i}:**")
@@ -495,7 +491,7 @@ def main():
                             )
                             st.markdown(f"> {display_text}")
 
-                    # Save to history
+                    # Save to history ...
                     st.session_state.chat_history.append(
                         {
                             "role": "assistant",
