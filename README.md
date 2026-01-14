@@ -6,7 +6,14 @@ The application comes in two flavors:
 1.  **`app-openai.py`**: Connects to the OpenAI API for embeddings and chat generation (Cloud-based).
 2.  **`app-ollama.py`**: Connects to a local Ollama instance, allowing you to run the entire system offline and for free (Local-based).
 
-!Demo Screenshot
+## Demo Screenshots
+
+### For the OpenAI API
+<img width="1920" height="1080" alt="Screenshot_302" src="https://github.com/user-attachments/assets/7fa75b42-cda7-4e79-9448-269dc7080e26" />
+
+### For Ollama
+<img width="1920" height="1080" alt="Screenshot_303" src="https://github.com/user-attachments/assets/e537c476-fdf3-43cb-94bd-fd3258187534" />
+
 
 ## ✨ Features
 
